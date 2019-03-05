@@ -2,6 +2,10 @@ import requests
 from urllib.parse import urlencode
 from requests.exceptions import ConnectionError
 from pyquery import PyQuery as pq
+import sys,io
+import pymongo
+client = pymongo.MongoClient('localhost')
+db = client['weixin']
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer,encoding='gb18030')
 headers = {
     'Cookie': 'IPLOC=CN4419; SUID=9EBA4E713320910A000000005C7D02AF; SUV=1551696558427502; ABTEST=0|1551696562|v1; SNUID=B590655A2A2EA969A844994A2B61B53C; weixinIndexVisited=1; JSESSIONID=aaaV9_aeMCm1m9E3lyZKw; sct=3; ppinf=5|1551696912|1552906512|dHJ1c3Q6MToxfGNsaWVudGlkOjQ6MjAxN3x1bmlxbmFtZToxODolRTYlOTclQUQlRTUlOEQlODd8Y3J0OjEwOjE1NTE2OTY5MTJ8cmVmbmljazoxODolRTYlOTclQUQlRTUlOEQlODd8dXNlcmlkOjQ0Om85dDJsdURBa3pTUV9TRmhpRFlfa0tmSGUwUEVAd2VpeGluLnNvaHUuY29tfA; pprdig=jcFOsL6HSfRfgKVylywFLYDvsXoVSR2sv88FbKmofrlluwI1o54luAtmDxJu80ClGAG-P1j3KLkTD9GAmZ5yUKSQCe-LIsG8e-3rTZNpHxbCoY1_9euK5aDo_ZaW2moZ38oKJUKadRJSBj3IYfl1mV8h1YVw71rbCo1qzNDI9QQ; sgid=01-37461965-AVx9BBArqPa3vV9Fs1K8oicc; ppmdig=15516969120000006bef6c7cff0eb520c30dff289163d78f',
@@ -67,13 +71,57 @@ def get_index(keyword,page):
     queries = urlencode(data)
     url = base_url + queries
     html = get_html(url)
-    print(html)
+    return html
 
 def parse_index(html):
     doc = pq(html)
-    items = doc('')
+    items = doc('.news-box .news-list li .txt-box h3 a').items()
+    for item in items:
+        yield item.attr('href')
+
+def get_detail(url):
+    try:
+        response = requests.get(url)
+        if response.status_code == 200:
+            return response.text
+        return None
+    except ConnectionError:
+        return None
+
+def parse_detail(html):
+    doc = pq(html)
+    title = doc('.rich_media_title').text()
+    content = doc('.rich_media_content').text()
+    date = doc('#post-date').text()
+    nickname = doc('#js_profile_qrcode > div > strong').text()
+    wechat = doc('#js_profile_qrcode > div > p:nth-child(3) > span').text()
+    return {
+        'title': title,
+        'content': content,
+        'date': date,
+        'nickname': nickname,
+        'wechat': wechat
+    }
+def save_to_mongo(data):
+    if db['articles'].update({'title':data['title']},{'$set':data},True):
+        print('Saved to Mongo',data['title'])
+    else:
+        print('Saved to Mongo Failed',data['title'])
+
+
 def main():
-    for page in range(1,101):
+    for page in range(1,10):
         html = get_index(keyword,page)
+        # print(html)
+        if html:
+            article_urls = parse_index(html)
+            for article_url in article_urls:
+                # print(article_url)
+                article_html = get_detail(article_url)
+                if article_html:
+                    article_data = parse_detail(article_html)
+                    # print(article_data)
+                    save_to_mongo(article_data)
+
 if __name__ == '__main__':
     main()
